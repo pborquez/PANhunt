@@ -6,9 +6,12 @@
 # PANhunt: search directories and sub directories for documents with PANs
 # By BB
 
-import os, sys, zipfile, re, datetime, cStringIO, argparse, time, hashlib, unicodedata, platform
+import os, sys, zipfile, re, datetime, io, argparse, time, hashlib, unicodedata, platform
 import colorama
-import ConfigParser
+try:
+    import configparser
+except ImportError:
+    import ConfigParser as configparser
 import progressbar
 import filehunt
 
@@ -140,11 +143,13 @@ class PAN:
 
 def get_text_hash(text):
 
-    if type(text) is unicode:
+    if isinstance(text, str):
         encoded_text = text.encode('utf-8')
-    else:
+    elif isinstance(text, bytes):
         encoded_text = text
-    return hashlib.sha512(encoded_text+'PAN').hexdigest()
+    else:
+        encoded_text = str(text).encode('utf-8')
+    return hashlib.sha512(encoded_text+b'PAN').hexdigest()
 
 
 def add_hash_to_file(text_file):
@@ -163,10 +168,10 @@ def check_file_hash(text_file):
     hash_in_file =  text_output[hash_pos+len(os.linesep):]
     hash_check = get_text_hash(text_output[:hash_pos])
     if hash_in_file == hash_check:
-        print colorama.Fore.GREEN + 'Hashes OK'
+        print(colorama.Fore.GREEN + 'Hashes OK')
     else:
-        print colorama.Fore.RED + 'Hashes Not OK'
-    print colorama.Fore.WHITE + hash_in_file +'\n' + hash_check
+        print(colorama.Fore.RED + 'Hashes Not OK')
+    print(colorama.Fore.WHITE + hash_in_file +'\n' + hash_check)
 
 
 def output_report(search_dir, excluded_directories_string, all_files, total_files_searched, pans_found, output_file, mask_pans):
@@ -180,20 +185,20 @@ def output_report(search_dir, excluded_directories_string, all_files, total_file
     
     for afile in sorted([afile for afile in all_files if afile.matches]):
         pan_header = u'FOUND PANs: %s (%s %s)' % (afile.path, afile.size_friendly(), afile.modified.strftime('%d/%m/%Y'))
-        print colorama.Fore.RED + filehunt.unicode2ascii(pan_header)
+        print(colorama.Fore.RED + filehunt.unicode2ascii(pan_header))
         pan_report += pan_header + '\n'
         pan_list = u'\t' + pan_sep.join([pan.__repr__(mask_pans) for pan in afile.matches])
-        print colorama.Fore.YELLOW + filehunt.unicode2ascii(pan_list)
+        print(colorama.Fore.YELLOW + filehunt.unicode2ascii(pan_list))
         pan_report += pan_list + '\n\n'
     
-    if len([afile for afile in all_files if afile.type == 'OTHER']) <> 0:
+    if len([afile for afile in all_files if afile.type == 'OTHER']) != 0:
         pan_report += u'Interesting Files to check separately:\n'
     for afile in sorted([afile for afile in all_files if afile.type == 'OTHER']):
         pan_report += u'%s (%s %s)\n' % (afile.path, afile.size_friendly(), afile.modified.strftime('%d/%m/%Y'))
 
     pan_report = pan_report.replace('\n', os.linesep)
 
-    print colorama.Fore.WHITE + 'Report written to %s' % filehunt.unicode2ascii(output_file)
+    print(colorama.Fore.WHITE + 'Report written to %s' % filehunt.unicode2ascii(output_file))
     filehunt.write_unicode_file(output_file, pan_report)
     add_hash_to_file(output_file)
 
@@ -204,7 +209,7 @@ def load_config_file():
     if not os.path.isfile(config_file):
         return
       
-    config = ConfigParser.ConfigParser()
+    config = configparser.ConfigParser()
     config.read(config_file)
     defaultConfig = {}
     for nvp in config.items('DEFAULT'):
@@ -297,17 +302,17 @@ if __name__ == "__main__":
         check_file_hash(args.checkfilehash)
         sys.exit()
 
-    search_dir = unicode(args.search)
-    output_file = unicode(args.outfile)
-    excluded_directories_string = unicode(args.exclude)
-    text_extensions_string = unicode(args.textfiles)    
-    zip_extensions_string = unicode(args.zipfiles)
-    special_extensions_string = unicode(args.specialfiles)
-    mail_extensions_string = unicode(args.mailfiles)
-    other_extensions_string = unicode(args.otherfiles)
+    search_dir = str(args.search)
+    output_file = str(args.outfile)
+    excluded_directories_string = str(args.exclude)
+    text_extensions_string = str(args.textfiles)    
+    zip_extensions_string = str(args.zipfiles)
+    special_extensions_string = str(args.specialfiles)
+    mail_extensions_string = str(args.mailfiles)
+    other_extensions_string = str(args.otherfiles)
     mask_pans = not args.unmask
-    excluded_pans_string = unicode(args.excludepan)
-    config_file = unicode(args.config)
+    excluded_pans_string = str(args.excludepan)
+    config_file = str(args.config)
     load_config_file()
         
     set_global_parameters()

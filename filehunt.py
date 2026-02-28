@@ -6,7 +6,7 @@
 # filehunt: general file searching library for use by PANhunt and PassHunt
 # By BB
 
-import os, sys, zipfile, re, datetime, cStringIO, argparse, time, hashlib, unicodedata, codecs
+import os, sys, zipfile, re, datetime, io, argparse, time, hashlib, unicodedata, codecs, pickle
 import colorama
 import progressbar
 import pst # MS-PST files
@@ -37,9 +37,11 @@ class AFile:
         self.type = None
         self.matches = []
 
-    def __cmp__(self, other):
+    def __lt__(self, other):
+        return self.path.lower() < other.path.lower()
     
-        return cmp(self.path.lower(), other.path.lower())
+    def __eq__(self, other):
+        return self.path.lower() == other.path.lower()
 
 
     def set_file_stats(self):
@@ -74,7 +76,10 @@ class AFile:
     def set_error(self, error_msg):
 
         self.errors.append(error_msg)
-        print colorama.Fore.RED + unicode2ascii(u'ERROR %s on %s' % (error_msg, self.path)) + colorama.Fore.WHITE
+        err_str = str(error_msg) if not isinstance(error_msg, str) else error_msg
+        path_str = self.path if isinstance(self.path, str) else self.path.decode('utf-8')
+        msg = unicode2ascii('ERROR %s on %s' % (err_str, path_str))
+        print(colorama.Fore.RED + msg + colorama.Fore.WHITE)
 
 
     def check_regexs(self, regexs, search_extensions):
@@ -83,8 +88,8 @@ class AFile:
         if self.type == 'ZIP':
             try:
                 if zipfile.is_zipfile(self.path):
-                    zf = zipfile.ZipFile(self.path)
-                    self.check_zip_regexs(zf, regexs, search_extensions, '')                                             
+                    with zipfile.ZipFile(self.path) as zf:
+                        self.check_zip_regexs(zf, regexs, search_extensions, '')
                 else:
                     self.set_error('Invalid ZIP file')
             except IOError:
@@ -185,11 +190,9 @@ class AFile:
         if attachment_ext in search_extensions['ZIP']:
             if attachment.data:
                 try:
-                    memory_zip = cStringIO.StringIO()
-                    memory_zip.write(attachment.data)
-                    zf = zipfile.ZipFile(memory_zip)
-                    self.check_zip_regexs(zf, regexs, search_extensions, os.path.join(sub_path, attachment.Filename))
-                    memory_zip.close()
+                    memory_zip = io.BytesIO(attachment.data)
+                    with zipfile.ZipFile(memory_zip) as zf:
+                        self.check_zip_regexs(zf, regexs, search_extensions, os.path.join(sub_path, attachment.Filename))
                 except: #RuntimeError: # e.g. zip needs password
                     self.set_error(sys.exc_info()[1])
 
@@ -212,24 +215,25 @@ class AFile:
         for file_in_zip in files_in_zip:
             if get_ext(file_in_zip) in search_extensions['ZIP']: # nested zip file
                 try:
-                    memory_zip = cStringIO.StringIO()
-                    memory_zip.write(zf.open(file_in_zip).read())
-                    nested_zf = zipfile.ZipFile(memory_zip)                    
-                    self.check_zip_regexs(nested_zf, regexs, search_extensions, os.path.join(sub_path, decode_zip_filename(file_in_zip)))
-                    memory_zip.close()
+                    with zf.open(file_in_zip) as infile:
+                        data = infile.read()
+                    with zipfile.ZipFile(io.BytesIO(data)) as nested_zf:
+                        self.check_zip_regexs(nested_zf, regexs, search_extensions, os.path.join(sub_path, decode_zip_filename(file_in_zip)))
                 except: #RuntimeError: # e.g. zip needs password
                     self.set_error(sys.exc_info()[1])
             elif get_ext(file_in_zip) in search_extensions['TEXT']: #normal doc
                 try:
-                    file_text = zf.open(file_in_zip).read()
+                    with zf.open(file_in_zip) as infile:
+                        file_text = infile.read()
                     self.check_text_regexs(file_text, regexs, os.path.join(sub_path, decode_zip_filename(file_in_zip)))
                 except: # RuntimeError: # e.g. zip needs password
-                    self.set_error(sys.exc_info()[1])     
+                    self.set_error(sys.exc_info()[1])
             else: # SPECIAL
                 try:
                     if get_ext(file_in_zip) == '.msg':
-                        memory_msg = cStringIO.StringIO()
-                        memory_msg.write(zf.open(file_in_zip).read())
+                        with zf.open(file_in_zip) as infile:
+                            data = infile.read()
+                        memory_msg = io.BytesIO(data)
                         msg = msmsg.MSMSG(memory_msg)
                         if msg.validMSG:
                             self.check_msg_regexs(msg, regexs, search_extensions, os.path.join(sub_path, decode_zip_filename(file_in_zip)))
@@ -256,7 +260,7 @@ def find_all_files_in_directory(AFileClass, root_dir, excluded_directories, sear
     all_extensions = [ext for ext_list in search_extensions.values() for ext in ext_list]
 
     extension_types = {}
-    for ext_type, ext_list in search_extensions.iteritems():
+    for ext_type, ext_list in search_extensions.items():
         for ext in ext_list:
             extension_types[ext] = ext_type
     
@@ -379,51 +383,41 @@ def load_object(fn):
 
 
 def read_file(fn, open_mode="r"):
-    f = open(fn, open_mode)
-    s = f.read()
-    f.close()
-    return s
+    with open(fn, open_mode) as f:
+        return f.read()
 
 
-def write_file(fn,s):
-
-    f = open(fn,"w")
-    f.write(s)
-    f.close()
+def write_file(fn, s):
+    with open(fn, "w") as f:
+        f.write(s)
 
 
 def read_unicode_file(fn):
-
-    f = codecs.open(fn, encoding='utf-8', mode='r')
-    s = f.read()
-    f.close()
-    return s
+    with codecs.open(fn, encoding='utf-8', mode='r') as f:
+        return f.read()
 
 
-def write_unicode_file(fn,s):
-
-    f = codecs.open(fn, encoding='utf-8', mode='w')
-    f.write(s)
-    f.close()
+def write_unicode_file(fn, s):
+    with codecs.open(fn, encoding='utf-8', mode='w') as f:
+        f.write(s)
 
 
-def write_csv(fn,dlines):
-
-    f = open(fn,"w")
-    for d in dlines:
-        s = ','.join(['"%s"' % str(i).replace('"',"'") for i in d])
-        f.write('%s\n' % s)
-    f.close()
+def write_csv(fn, dlines):
+    with open(fn, "w") as f:
+        for d in dlines:
+            s = ','.join(['"%s"' % str(i).replace('"', "'") for i in d])
+            f.write('%s\n' % s)
 
 
 def unicode2ascii(unicode_str):
 
-    return unicodedata.normalize('NFKD', unicode_str).encode('ascii','ignore')
+    result = unicodedata.normalize('NFKD', unicode_str).encode('ascii', 'ignore')
+    return result.decode('ascii') if isinstance(result, bytes) else result
 
 
 def decode_zip_filename(str):
 
-    if type(str) is unicode:
+    if isinstance(str, str):
         return str
     else:
         return str.decode('cp437')
@@ -439,8 +433,8 @@ def get_friendly_size(size):
         if size < 1024:
             return '{0}B'.format(size)
         elif size < 1024*1024:
-            return '{0}KB'.format(size/1024)
+            return '{0}KB'.format(size//1024)
         elif size < 1024*1024*1024:
-            return '{0}MB'.format(size/(1024*1024))
+            return '{0}MB'.format(size//(1024*1024))
         else:
             return '{0:.1f}GB'.format(size*1.0/(1024.0*1024*1024))
